@@ -484,7 +484,7 @@ class BaseTrainer:
         buffer = io.BytesIO()
         torch.save(
             {
-                "epoch": self.epoch,
+                "epoch": self.epoch + 1,
                 "best_fitness": self.best_fitness,
                 "model": None,  # resume and final checkpoints derive from EMA
                 "ema": deepcopy(self.ema.ema).half(),
@@ -506,8 +506,8 @@ class BaseTrainer:
         self.last.write_bytes(serialized_ckpt)  # save last.pt
         if self.best_fitness == self.fitness:
             self.best.write_bytes(serialized_ckpt)  # save best.pt
-        if (self.save_period > 0) and (self.epoch > 0) and (self.epoch % self.save_period == 0):
-            (self.wdir / f"epoch{self.epoch}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
+        if (self.save_period > 0) and (self.epoch + 1 > 0) and ((self.epoch + 1) % self.save_period == 0):
+            (self.wdir / f"epoch{self.epoch + 1}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
 
     def get_dataset(self):
         """
