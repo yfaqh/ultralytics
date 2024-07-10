@@ -410,7 +410,7 @@ class BaseTrainer:
                 if RANK in {-1, 0}:
                     pbar.set_description(
                         ("%11s" * 2 + "%11.4g" * (2 + loss_len))
-                        % (f"{epoch + 1}/{self.epochs}", mem, *losses, batch["cls"].shape[0], batch["img"].shape[-1])
+                        % (f"{epoch + 1 if not self.resume else epoch}/{self.epochs}", mem, *losses, batch["cls"].shape[0], batch["img"].shape[-1])
                     )
                     self.run_callbacks("on_batch_end")
                     if self.args.plots and ni in self.plot_idx:
@@ -421,14 +421,14 @@ class BaseTrainer:
             self.lr = {f"lr/pg{ir}": x["lr"] for ir, x in enumerate(self.optimizer.param_groups)}  # for loggers
             self.run_callbacks("on_train_epoch_end")
             if RANK in {-1, 0}:
-                final_epoch = epoch + 1 >= self.epochs
+                final_epoch = epoch + 1 if not self.resume else epoch >= self.epochs
                 self.ema.update_attr(self.model, include=["yaml", "nc", "args", "names", "stride", "class_weights"])
 
                 # Validation
                 if self.args.val or final_epoch or self.stopper.possible_stop or self.stop:
                     self.metrics, self.fitness = self.validate()
                 self.save_metrics(metrics={**self.label_loss_items(self.tloss), **self.metrics, **self.lr})
-                self.stop |= self.stopper(epoch + 1, self.fitness) or final_epoch
+                self.stop |= self.stopper(epoch + 1 if not self.resume else epoch, self.fitness) or final_epoch
                 if self.args.time:
                     self.stop |= (time.time() - self.train_time_start) > (self.args.time * 3600)
 
@@ -484,7 +484,7 @@ class BaseTrainer:
         buffer = io.BytesIO()
         torch.save(
             {
-                "epoch": self.epoch + 1,
+                "epoch": self.epoch + 1 if not self.resume else self.epoch,
                 "best_fitness": self.best_fitness,
                 "model": None,  # resume and final checkpoints derive from EMA
                 "ema": deepcopy(self.ema.ema).half(),
@@ -506,7 +506,7 @@ class BaseTrainer:
         self.last.write_bytes(serialized_ckpt)  # save last.pt
         if self.best_fitness == self.fitness:
             self.best.write_bytes(serialized_ckpt)  # save best.pt
-        if (self.save_period > 0) and (self.epoch + 1 > 0) and ((self.epoch + 1) % self.save_period == 0):
+        if (self.save_period > 0) and ((self.epoch + 1 if not self.resume else self.epoch) % self.save_period == 0):
             (self.wdir / f"epoch{self.epoch + 1}.pt").write_bytes(serialized_ckpt)  # save epoch, i.e. 'epoch3.pt'
 
     def get_dataset(self):
@@ -625,7 +625,7 @@ class BaseTrainer:
         n = len(metrics) + 1  # number of cols
         s = "" if self.csv.exists() else (("%23s," * n % tuple(["epoch"] + keys)).rstrip(",") + "\n")  # header
         with open(self.csv, "a") as f:
-            f.write(s + ("%23.5g," * n % tuple([self.epoch + 1] + vals)).rstrip(",") + "\n")
+            f.write(s + ("%23.5g," * n % tuple([self.epoch + 1 if not self.resume else self.epoch] + vals)).rstrip(",") + "\n")
 
     def plot_metrics(self):
         """Plot and display metrics visually."""
@@ -691,7 +691,7 @@ class BaseTrainer:
             f"{self.args.model} training to {self.epochs} epochs is finished, nothing to resume.\n"
             f"Start a new training without resuming, i.e. 'yolo train model={self.args.model}'"
         )
-        LOGGER.info(f"Resuming training {self.args.model} from epoch {start_epoch + 1} to {self.epochs} total epochs")
+        LOGGER.info(f"Resuming training {self.args.model} from epoch {start_epoch + 1 if not self.resume else start_epoch} to {self.epochs} total epochs")
         if self.epochs < start_epoch:
             LOGGER.info(
                 f"{self.model} has been trained for {ckpt['epoch']} epochs. Fine-tuning for {self.epochs} more epochs."
