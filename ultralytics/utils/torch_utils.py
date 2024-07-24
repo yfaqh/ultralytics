@@ -21,6 +21,7 @@ from ultralytics.utils import (
     DEFAULT_CFG_DICT,
     DEFAULT_CFG_KEYS,
     LOGGER,
+    NUM_THREADS,
     PYTHON_VERSION,
     TORCHVISION_VERSION,
     __version__,
@@ -40,6 +41,7 @@ TORCH_2_0 = check_version(torch.__version__, "2.0.0")
 TORCHVISION_0_10 = check_version(TORCHVISION_VERSION, "0.10.0")
 TORCHVISION_0_11 = check_version(TORCHVISION_VERSION, "0.11.0")
 TORCHVISION_0_13 = check_version(TORCHVISION_VERSION, "0.13.0")
+TORCHVISION_0_18 = check_version(TORCHVISION_VERSION, "0.18.0")
 
 
 @contextmanager
@@ -64,6 +66,37 @@ def smart_inference_mode():
             return (torch.inference_mode if TORCH_1_9 else torch.no_grad)()(fn)
 
     return decorate
+
+
+def autocast(enabled: bool, device: str = "cuda"):
+    """
+    Get the appropriate autocast context manager based on PyTorch version and AMP setting.
+
+    This function returns a context manager for automatic mixed precision (AMP) training that is compatible with both
+    older and newer versions of PyTorch. It handles the differences in the autocast API between PyTorch versions.
+
+    Args:
+        enabled (bool): Whether to enable automatic mixed precision.
+        device (str, optional): The device to use for autocast. Defaults to 'cuda'.
+
+    Returns:
+        (torch.amp.autocast): The appropriate autocast context manager.
+
+    Note:
+        - For PyTorch versions 1.13 and newer, it uses `torch.amp.autocast`.
+        - For older versions, it uses `torch.cuda.autocast`.
+
+    Example:
+        ```python
+        with autocast(amp=True):
+            # Your mixed precision operations here
+            pass
+        ```
+    """
+    if TORCH_1_13:
+        return torch.amp.autocast(device, enabled=enabled)
+    else:
+        return torch.cuda.amp.autocast(enabled)
 
 
 def get_cpu_info():
@@ -171,6 +204,8 @@ def select_device(device="", batch=0, newline=False, verbose=True):
         s += f"CPU ({get_cpu_info()})\n"
         arg = "cpu"
 
+    if arg in {"cpu", "mps"}:
+        torch.set_num_threads(NUM_THREADS)  # reset OMP_NUM_THREADS for cpu training
     if verbose:
         LOGGER.info(s if newline else s.rstrip())
     return torch.device(arg)
@@ -271,7 +306,7 @@ def model_info(model, detailed=False, verbose=True, imgsz=640):
     fs = f", {flops:.1f} GFLOPs" if flops else ""
     yaml_file = getattr(model, "yaml_file", "") or getattr(model, "yaml", {}).get("yaml_file", "")
     model_name = Path(yaml_file).stem.replace("yolo", "YOLO") or "Model"
-    LOGGER.info(f"{model_name} summary{fused}: {n_l} layers, {n_p} parameters, {n_g} gradients{fs}")
+    LOGGER.info(f"{model_name} summary{fused}: {n_l:,} layers, {n_p:,} parameters, {n_g:,} gradients{fs}")
     return n_l, n_p, n_g, flops
 
 
@@ -513,6 +548,9 @@ def strip_optimizer(f: Union[str, Path] = "best.pt", s: str = "") -> None:
         for f in Path('path/to/model/checkpoints').rglob('*.pt'):
             strip_optimizer(f)
         ```
+
+    Note:
+        Use `ultralytics.nn.torch_safe_load` for missing modules with `x = torch_safe_load(f)[0]`
     """
     try:
         x = torch.load(f, map_location=torch.device("cpu"))
